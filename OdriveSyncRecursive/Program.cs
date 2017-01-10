@@ -11,15 +11,31 @@ namespace OdriveSyncRecursive
     {
         private delegate Task HandleDirectory(IEnumerable<DirectoryInfo> dirs, IEnumerable<FileInfo> files);
 
-        private static void WalkPath(DirectoryInfo basePath, HandleDirectory handler)
+        private delegate Task<bool> HandleError(Exception e);
+
+        private static async Task WalkPath(DirectoryInfo basePath, HandleDirectory handleDirectory, HandleError errorHandler)
         {
             var paths = new Queue<DirectoryInfo>(new []{basePath});
             while (paths.Any())
             {
                 var path = paths.Dequeue();
-                var dirs = path.EnumerateDirectories();
-                var files = path.EnumerateFiles();
-                handler(dirs, files).Wait();
+                IEnumerable<DirectoryInfo> dirs;
+                IEnumerable<FileInfo> files;
+                try
+                {
+                    dirs = path.EnumerateDirectories();
+                    files = path.EnumerateFiles();
+                }
+                catch (Exception e)
+                {
+                    var fatal = await errorHandler(e);
+                    if (fatal)
+                    {
+                        return;
+                    }
+                    continue;
+                }
+                await handleDirectory(dirs, files);
                 foreach (var dir in path.EnumerateDirectories().OrderBy(d => d.Name))
                 {
                     paths.Enqueue(dir);
@@ -37,9 +53,16 @@ namespace OdriveSyncRecursive
             }
         }
 
+        private static async Task<bool> LogError(Exception e)
+        {
+            await Task.Delay(0);
+            Console.WriteLine(e.Message);
+            return false;
+        }
+
         static void Main(string[] args)
         {
-            WalkPath(new DirectoryInfo(@"C:\Users\accalia"), WalkLog);
+            WalkPath(new DirectoryInfo(@"C:\Users\accalia"), WalkLog, LogError).Wait();
         }
     }
 }
